@@ -174,11 +174,13 @@ async function handleStyleSelect(styleName) {
 }
 
 /**
- * Main render loop — runs inference on each frame
+ * Main render loop — runs inference on each frame.
+ * Uses a flag to prevent overlapping inference calls (since inference is async).
  */
 let lastFrameTime = 0;
 let frameCount = 0;
 let fpsInterval = 0;
+let inferenceInProgress = false;
 
 function renderLoop(timestamp) {
   if (!state.isRunning) return;
@@ -196,13 +198,17 @@ function renderLoop(timestamp) {
   // Get source frame (webcam or static image)
   const source = state.useStaticImage ? state.staticImage : webcam;
 
-  if (state.session && state.currentStyle) {
-    // Run style transfer inference
-    processFrame(source);
-  } else {
+  if (state.session && state.currentStyle && !inferenceInProgress) {
+    // Run style transfer inference (async, but we gate on the flag)
+    inferenceInProgress = true;
+    processFrame(source).finally(() => {
+      inferenceInProgress = false;
+    });
+  } else if (!state.session || !state.currentStyle) {
     // No style selected — show raw feed
     drawRawFrame(source);
   }
+  // If inference is in progress, we skip this frame (canvas keeps showing previous result)
 
   requestAnimationFrame(renderLoop);
 }
