@@ -15,7 +15,7 @@ const state = {
   isRunning: false,
   mirror: true,
   blend: 1.0,
-  resolution: 256,
+  resolution: 224,
   useStaticImage: false,
   staticImage: null,
 };
@@ -40,7 +40,7 @@ function init() {
     onBlendChange: (value) => { state.blend = value / 100; },
     onMirrorToggle: (checked) => { state.mirror = checked; },
     onResolutionToggle: (checked) => {
-      state.resolution = checked ? 512 : 256;
+      state.resolution = checked ? 448 : 224;
       // Reload model at new resolution if one is active
       if (state.currentStyle) {
         handleStyleSelect(state.currentStyle);
@@ -227,11 +227,6 @@ async function processFrame(source) {
     // Postprocess: convert output tensor back to ImageData
     const styledImageData = postprocessOutput(outputTensor, state.resolution);
 
-    // Create offscreen canvas for the styled frame
-    const offscreen = new OffscreenCanvas(state.resolution, state.resolution);
-    const offCtx = offscreen.getContext('2d');
-    offCtx.putImageData(styledImageData, 0, 0);
-
     // Draw to main canvas with blending
     ctx.save();
 
@@ -246,11 +241,16 @@ async function processFrame(source) {
       ctx.globalAlpha = state.blend;
     }
 
-    // Draw styled frame
-    ctx.drawImage(offscreen, 0, 0, canvas.width, canvas.height);
+    // Draw styled frame — use createImageBitmap for reliable canvas drawing
+    const bitmap = await createImageBitmap(styledImageData);
+    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close();
+
     ctx.restore();
   } catch (err) {
-    // If inference fails, just show the raw frame
+    console.error('Inference error:', err);
+    // Show the error in the UI so user can see what's wrong
+    showProgress(`Error: ${err.message}`, 0);
     drawRawFrame(source);
   }
 }
