@@ -1,0 +1,5 @@
+node_modules/
+dist/
+*.onnx
+.DS_Store
+*.local

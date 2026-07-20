@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PaintMe — Neural Style Transfer Camera</title>
+  <link rel="stylesheet" href="/styles/main.css" />
+</head>
+<body>
+  <!-- Landing overlay shown before camera starts -->
+  <div id="landing" class="landing">
+    <div class="landing-content">
+      <h1 class="landing-title">🎨 PaintMe</h1>
+      <p class="landing-subtitle">Transform your camera feed into living art using neural style transfer — powered by WebNN</p>
+      <button id="start-btn" class="start-btn">Start Camera</button>
+      <p class="landing-hint">Or drag & drop an image below</p>
+      <div id="drop-zone" class="drop-zone">
+        <span>Drop image here</span>
+        <input type="file" id="file-input" accept="image/*" hidden />
+      </div>
+    </div>
+  </div>
+
+  <!-- Main app (hidden until camera starts) -->
+  <div id="app" class="app hidden">
+    <!-- Video/Canvas display area -->
+    <div class="canvas-container">
+      <video id="webcam" autoplay playsinline muted></video>
+      <canvas id="output-canvas"></canvas>
+      <!-- Status badges -->
+      <div class="status-bar">
+        <span id="provider-badge" class="badge">WASM</span>
+        <span id="fps-badge" class="badge">0 FPS</span>
+      </div>
+      <!-- Progress bar for model loading -->
+      <div id="progress-container" class="progress-container hidden">
+        <div id="progress-bar" class="progress-bar"></div>
+        <span id="progress-text" class="progress-text">Loading model...</span>
+      </div>
+    </div>
+
+    <!-- Style picker strip -->
+    <div class="style-picker" id="style-picker">
+      <!-- Style cards injected by JS -->
+    </div>
+
+    <!-- Controls panel -->
+    <div class="controls">
+      <div class="control-group">
+        <label for="blend-slider">Blend</label>
+        <input type="range" id="blend-slider" min="0" max="100" value="100" />
+        <span id="blend-value">100%</span>
+      </div>
+      <div class="control-group">
+        <label for="mirror-toggle">Mirror</label>
+        <input type="checkbox" id="mirror-toggle" checked />
+      </div>
+      <div class="control-group">
+        <label for="resolution-toggle">Hi-Res (512)</label>
+        <input type="checkbox" id="resolution-toggle" />
+      </div>
+      <div class="control-buttons">
+        <button id="snap-btn" class="action-btn" title="Save frame as PNG">📸 Snap</button>
+        <button id="record-btn" class="action-btn" title="Record a few seconds as WebM">🎥 Record</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
