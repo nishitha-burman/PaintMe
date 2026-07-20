@@ -14,8 +14,8 @@ const STORE_NAME = 'onnx-models';
 // Track which execution provider is in use
 let activeProvider = 'wasm';
 
-// Base URL for ONNX Model Zoo style transfer models (opset 9)
-const MODEL_ZOO_BASE = 'https://github.com/onnx/models/raw/main/validated/vision/style_transfer/fast_neural_style/models';
+// Base URL for ONNX Model Zoo style transfer models (Git LFS via media.githubusercontent.com)
+const MODEL_ZOO_BASE = 'https://media.githubusercontent.com/media/onnx/models/main/validated/vision/style_transfer/fast_neural_style/model';
 
 /**
  * Available style models with their metadata.
