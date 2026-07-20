@@ -141,20 +141,33 @@ function handleImageFile(file) {
  * Handle style selection — loads the model and starts inference
  */
 async function handleStyleSelect(styleName) {
+  // Pause current inference while loading new model
+  state.session = null;
   state.currentStyle = styleName;
 
-  showProgress(`Loading ${styleName} model...`);
+  showProgress(`Downloading ${styleName} model...`, 0);
 
   try {
-    state.session = await createInferenceSession(styleName, state.resolution, (progress) => {
-      showProgress(`Loading ${styleName}...`, progress);
+    state.session = await createInferenceSession(styleName, state.resolution, (progress, phase) => {
+      if (phase === 'download') {
+        showProgress(`Downloading ${styleName} model...`, progress);
+      } else if (phase === 'cached') {
+        showProgress(`Loading ${styleName} from cache...`, 50);
+      } else if (phase === 'creating') {
+        showProgress(`Preparing ${styleName} model...`, 90);
+      }
     });
 
-    hideProgress();
+    // Show success briefly so user sees it finished
+    showProgress(`${styleName} ready!`, 100);
     updateProviderBadge(getProvider());
+
+    // Keep "ready" message visible for a moment before hiding
+    setTimeout(() => hideProgress(), 1200);
   } catch (err) {
     console.error('Failed to load model:', err);
-    hideProgress();
+    showProgress(`Failed to load ${styleName}. Check console.`, 0);
+    setTimeout(() => hideProgress(), 3000);
     state.session = null;
     state.currentStyle = null;
   }

@@ -98,6 +98,7 @@ function buildStylePicker(onSelect) {
  */
 export function showProgress(message, percent = 0) {
   progressContainer.classList.remove('hidden');
+  progressContainer.classList.toggle('success', percent === 100 && message.includes('ready'));
   progressBar.style.setProperty('--progress', `${percent}%`);
   progressText.textContent = message;
 }

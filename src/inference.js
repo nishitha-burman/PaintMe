@@ -159,11 +159,14 @@ export async function createInferenceSession(styleName, resolution, onProgress) 
 
   if (!modelData) {
     // Download the model and cache it
-    modelData = await downloadModel(modelUrl, onProgress);
+    modelData = await downloadModel(modelUrl, (percent) => onProgress(percent, 'download'));
     await cacheModel(modelKey, modelData);
   } else {
-    onProgress(100);
+    onProgress(100, 'cached');
   }
+
+  // Signal that we're now creating the session (the slow part after download)
+  onProgress(90, 'creating');
 
   // Configure session options with execution provider fallback
   const providers = getExecutionProviders();
@@ -177,7 +180,7 @@ export async function createInferenceSession(styleName, resolution, onProgress) 
     graphOptimizationLevel: 'all',
   };
 
-  // Create the session
+  // Create the session (this parses the model and builds the execution graph)
   const session = await ort.InferenceSession.create(modelData, sessionOptions);
 
   // Detect which provider was actually used

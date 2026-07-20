@@ -214,6 +214,15 @@ body {
   white-space: nowrap;
 }
 
+.progress-container.success .progress-text {
+  color: var(--success);
+  font-weight: 600;
+}
+
+.progress-container.success .progress-bar::after {
+  background: var(--success);
+}
+
 /* ============================================================
    Style Picker
    ============================================================ */
