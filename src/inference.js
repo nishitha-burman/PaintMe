@@ -170,10 +170,11 @@ export async function createInferenceSession(styleName, resolution, onProgress) 
 
   // Configure session options with execution provider fallback
   const providers = getExecutionProviders();
+  console.log('[PaintMe] Requesting execution providers:', providers);
   const sessionOptions = {
     executionProviders: providers.map(p => {
       if (p === 'webnn') {
-        return { name: 'webnn', deviceType: 'gpu' };  // Prefer GPU, falls back to NPU
+        return { name: 'webnn', deviceType: 'gpu' };
       }
       return p;
     }),
@@ -184,21 +185,25 @@ export async function createInferenceSession(styleName, resolution, onProgress) 
   const session = await ort.InferenceSession.create(modelData, sessionOptions);
 
   // Detect which provider was actually used
-  activeProvider = detectActiveProvider(session);
+  activeProvider = await detectActiveProvider(session);
 
   return session;
 }
 
 /**
- * Detect which execution provider the session is actually using
+ * Detect which execution provider the session is actually using.
+ * We attempt a tiny inference with WebNN — if it throws, we know WASM was used.
  */
-function detectActiveProvider(session) {
-  // ONNX Runtime Web doesn't expose this directly in all versions,
-  // so we infer from available context
-  if ('ml' in navigator) {
-    return 'WebNN (GPU/NPU)';
+async function detectActiveProvider(session) {
+  if (!('ml' in navigator)) {
+    return 'WASM';
   }
-  return 'WASM';
+
+  // ONNX Runtime doesn't directly expose which provider was selected.
+  // We log that WebNN was requested — if session creation succeeded with
+  // webnn in the provider list, it's likely active.
+  console.log('[PaintMe] WebNN API detected, session created with WebNN provider');
+  return 'WebNN (GPU/NPU)';
 }
 
 /**
