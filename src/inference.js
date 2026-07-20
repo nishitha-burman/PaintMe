@@ -14,19 +14,20 @@ const STORE_NAME = 'onnx-models';
 // Track which execution provider is in use
 let activeProvider = 'wasm';
 
+// Base URL for ONNX Model Zoo style transfer models (opset 9)
+const MODEL_ZOO_BASE = 'https://github.com/onnx/models/raw/main/validated/vision/style_transfer/fast_neural_style/models';
+
 /**
  * Available style models with their metadata.
- * Model files should be placed in public/models/ as {name}_{resolution}.onnx
+ * Models are fetched from the ONNX Model Zoo on GitHub and cached in IndexedDB.
+ * These models accept dynamic input sizes (we use 256x256 or 512x512).
  */
 export const STYLES = [
-  { name: 'starry_night', label: 'Starry Night', thumbnail: '/thumbnails/starry_night.jpg' },
-  { name: 'the_scream', label: 'The Scream', thumbnail: '/thumbnails/the_scream.jpg' },
-  { name: 'mosaic', label: 'Mosaic', thumbnail: '/thumbnails/mosaic.jpg' },
-  { name: 'candy', label: 'Candy', thumbnail: '/thumbnails/candy.jpg' },
-  { name: 'udnie', label: 'Udnie', thumbnail: '/thumbnails/udnie.jpg' },
-  { name: 'rain_princess', label: 'Rain Princess', thumbnail: '/thumbnails/rain_princess.jpg' },
-  { name: 'pointilism', label: 'Pointilism', thumbnail: '/thumbnails/pointilism.jpg' },
-  { name: 'la_muse', label: 'La Muse', thumbnail: '/thumbnails/la_muse.jpg' },
+  { name: 'candy', label: 'Candy', thumbnail: '/thumbnails/candy.jpg', file: 'candy-9.onnx' },
+  { name: 'mosaic', label: 'Mosaic', thumbnail: '/thumbnails/mosaic.jpg', file: 'mosaic-9.onnx' },
+  { name: 'rain_princess', label: 'Rain Princess', thumbnail: '/thumbnails/rain_princess.jpg', file: 'rain-princess-9.onnx' },
+  { name: 'pointilism', label: 'Pointilism', thumbnail: '/thumbnails/pointilism.jpg', file: 'pointilism-9.onnx' },
+  { name: 'udnie', label: 'Udnie', thumbnail: '/thumbnails/udnie.jpg', file: 'udnie-9.onnx' },
 ];
 
 /**
@@ -146,8 +147,12 @@ function getExecutionProviders() {
  * @returns {Promise<ort.InferenceSession>}
  */
 export async function createInferenceSession(styleName, resolution, onProgress) {
-  const modelKey = `${styleName}_${resolution}`;
-  const modelUrl = `/models/${modelKey}.onnx`;
+  const style = STYLES.find(s => s.name === styleName);
+  if (!style) throw new Error(`Unknown style: ${styleName}`);
+
+  const modelKey = `${styleName}_v9`;
+  // Fetch from ONNX Model Zoo on GitHub (cached in IndexedDB after first load)
+  const modelUrl = `${MODEL_ZOO_BASE}/${style.file}`;
 
   // Try to load from IndexedDB cache first
   let modelData = await getCachedModel(modelKey);
