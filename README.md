@@ -100,6 +100,8 @@ npm run preview  # Preview production build
 | WASM    | ✅          | ✅      | ✅     |
 | Camera  | ✅          | ✅      | ✅     |
 
+Enable WebNN in Edge: `edge://flags/#web-machine-learning-neural-network` → set to **Enabled** → Relaunch
+
 Enable WebNN in Chrome: `chrome://flags/#enable-web-machine-learning-neural-network-api`
 
 ## 📖 Documentation
