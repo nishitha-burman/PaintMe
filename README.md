@@ -2,6 +2,8 @@
 
 **Real-time neural style transfer camera app powered by WebNN and ONNX Runtime Web.**
 
+🌐 **[Live Demo](https://nishitha-burman.github.io/PaintMe/)**
+
 Transform your webcam feed into living art — Starry Night, The Scream, Mosaic, and more — running entirely in the browser with hardware-accelerated AI inference.
 
 ![PaintMe Demo](https://img.shields.io/badge/status-prototype-blueviolet)
