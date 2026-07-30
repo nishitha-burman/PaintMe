@@ -193,7 +193,7 @@ async function handleStyleSelect(styleName) {
 
     // Show success briefly so user sees it finished
     showProgress(`${styleName} ready!`, 100);
-    updateProviderBadge(getProvider());
+    updateProviderBadge(getProviderLabel());
 
     // Keep "ready" message visible for a moment before hiding
     setTimeout(() => hideProgress(), 1200);
@@ -207,6 +207,15 @@ async function handleStyleSelect(styleName) {
 }
 
 /**
+ * Build the provider badge label showing inference + postprocessing pipeline
+ */
+function getProviderLabel() {
+  const infer = getProvider(); // 'WebNN' or 'WASM'
+  const post = state.useGPUPipeline ? 'GPU Post' : 'JS Post';
+  return `${infer} · ${post}`;
+}
+
+/**
  * Handle GPU Pipeline toggle.
  * Initializes WebGPU on first enable. Never destroys — just swaps which canvas is visible.
  * This avoids all race conditions from tearing down GPU resources mid-frame.
@@ -216,7 +225,7 @@ async function handleGPUPipelineToggle(enabled) {
     // If already initialized, just flip the flag — no re-init needed
     if (state.gpuPipelineReady) {
       state.useGPUPipeline = true;
-      updateProviderBadge('WebGPU + WebNN');
+      updateProviderBadge(getProviderLabel());
       return;
     }
 
@@ -248,7 +257,7 @@ async function handleGPUPipelineToggle(enabled) {
       state.useGPUPipeline = true;
       state.gpuPipelineReady = true;
       showProgress('GPU Pipeline ready!', 100);
-      updateProviderBadge('WebGPU + WebNN');
+      updateProviderBadge(getProviderLabel());
       setTimeout(() => hideProgress(), 1200);
     } else {
       showProgress('WebGPU pipeline init failed — using JS pipeline', 0);
@@ -264,7 +273,7 @@ async function handleGPUPipelineToggle(enabled) {
     const gpuCanvas = document.getElementById('gpu-canvas');
     if (gpuCanvas) gpuCanvas.style.display = 'none';
 
-    updateProviderBadge(getProvider());
+    updateProviderBadge(getProviderLabel());
   }
 }
 

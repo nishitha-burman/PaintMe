@@ -203,7 +203,7 @@ async function detectActiveProvider(session) {
   // We log that WebNN was requested — if session creation succeeded with
   // webnn in the provider list, it's likely active.
   console.log('[PaintMe] WebNN API detected, session created with WebNN provider');
-  return 'WebNN (GPU/NPU)';
+  return 'WebNN';
 }
 
 /**
