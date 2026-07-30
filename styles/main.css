@@ -166,10 +166,11 @@ body {
 }
 
 .version-badge--landing {
-  bottom: 1.5rem;
-  right: 1.5rem;
-  top: auto;
-  left: auto;
+  position: fixed;
+  top: 1rem;
+  left: 1rem;
+  bottom: auto;
+  right: auto;
 }
 
 .status-bar {

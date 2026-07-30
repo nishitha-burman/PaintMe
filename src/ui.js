@@ -135,5 +135,5 @@ export function updateProviderBadge(provider) {
  * @param {number} fps - Current frames per second
  */
 export function updateFPS(fps) {
-  fpsBadge.textContent = `${fps} FPS`;
+  fpsBadge.textContent = `${fps} Hz`;
 }
