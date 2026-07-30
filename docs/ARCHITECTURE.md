@@ -163,7 +163,7 @@ An optional GPU pipeline can be enabled via the "GPU Pipeline" toggle. When acti
 - Creates compute shader pipelines for postprocessing
 - Creates a render pipeline (full-screen quad) for final output
 - Manages GPU buffer lifecycle and bind groups
-- Gracefully handles teardown when toggled off mid-frame
+- Resources are initialized once and kept alive for the page lifetime (no teardown on toggle-off)
 
 ## Performance Metrics Overlay
 

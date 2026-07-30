@@ -150,14 +150,17 @@ This document captures key architectural and technology choices made during Pain
 
 ---
 
-## Why setTimeout for Toggle-Off Safety (GPU Pipeline)?
+## Why Init-Once / Never-Destroy for GPU Pipeline Toggle?
 
-**Decision**: When the GPU Pipeline toggle is disabled, we call `setTimeout(() => inferenceInProgress = false, 100)` as a safety net.
+**Decision**: WebGPU device, buffers, and shader pipelines are initialized once on first toggle-on and kept alive for the entire page lifetime. Toggling off just flips a boolean flag — no resource teardown.
 
 **Rationale**:
-- **In-flight promises** — Toggling off mid-inference means a GPU-path promise is still running. If that promise's `.then()` throws (because GPU resources were nulled), `inferenceInProgress` stays `true` forever, freezing the render loop.
-- **No `gpuDevice.destroy()`** — Originally we called `gpuDevice.destroy()` on toggle-off, but this immediately invalidates all GPU objects and causes WebGPU errors in any in-flight work. Nulling references and letting GC collect the device avoids these crashes.
-- **100ms is conservative** — Long enough for any pending rAF callback to fire and hit the null-check guard, short enough to feel instant to the user.
+- **Race conditions** — Earlier versions destroyed GPU resources on toggle-off, which crashed in-flight GPU commands and froze the page. `gpuDevice.destroy()` invalidated all GPU objects immediately. Even nulling references + `setTimeout` wasn't reliable because the async render loop could still reference destroyed buffers.
+- **Toggle is for A/B comparison** — Users flip back and forth rapidly. Recreating the device, compiling shaders, and allocating buffers on every toggle added 100-500ms latency.
+- **Negligible VRAM cost** — Two 224×224 buffers and a compute shader use ~2-3 MB. Not worth the complexity of lifecycle management.
+- **Instant re-enable** — Second toggle-on skips initialization entirely since resources are already alive.
+
+**Tradeoff**: GPU resources stay allocated even when using the JS pipeline. Acceptable given the small memory footprint — the browser reclaims everything on tab close.
 
 ---
 
