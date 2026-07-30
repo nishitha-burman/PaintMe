@@ -286,11 +286,12 @@ const perfMetrics = {
   frameTime: 0,
   inferTime: 0,
   postTime: 0,
-  dropped: 0,
+  droppedPerSec: 0,
   // Accumulators for averaging
   _frameSamples: [],
   _inferSamples: [],
   _postSamples: [],
+  _droppedCount: 0,
   _lastUpdate: 0,
 };
 
@@ -313,10 +314,11 @@ function recordPerfSample(timing) {
     perfFrameEl.textContent = avg(perfMetrics._frameSamples).toFixed(1);
     perfInferEl.textContent = avg(perfMetrics._inferSamples).toFixed(1);
     perfPostEl.textContent = avg(perfMetrics._postSamples).toFixed(1);
-    perfDroppedEl.textContent = perfMetrics.dropped;
+    perfDroppedEl.textContent = perfMetrics._droppedCount + '/s';
     perfMetrics._frameSamples = [];
     perfMetrics._inferSamples = [];
     perfMetrics._postSamples = [];
+    perfMetrics._droppedCount = 0;
     perfMetrics._lastUpdate = now;
   }
 }
@@ -327,7 +329,7 @@ function showPerfOverlay() {
 
 function hidePerfOverlay() {
   perfOverlay.classList.add('hidden');
-  perfMetrics.dropped = 0;
+  perfMetrics._droppedCount = 0;
 }
 
 function renderLoop(timestamp) {
@@ -391,7 +393,7 @@ function renderLoop(timestamp) {
     }
   } else if (state.session && state.currentStyle && inferenceInProgress) {
     // Frame dropped — inference still in progress
-    perfMetrics.dropped++;
+    perfMetrics._droppedCount++;
   } else if (!state.session || !state.currentStyle) {
     // No style selected — show raw feed on 2D canvas
     hidePerfOverlay();
