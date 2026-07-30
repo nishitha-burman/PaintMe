@@ -243,12 +243,17 @@ let fpsInterval = 0;
 let inferenceInProgress = false;
 let droppedFrames = 0;
 
-// Performance metrics state
+// Performance metrics state — rolling averages updated once per second
 const perfMetrics = {
   frameTime: 0,
   inferTime: 0,
   postTime: 0,
   dropped: 0,
+  // Accumulators for averaging
+  _frameSamples: [],
+  _inferSamples: [],
+  _postSamples: [],
+  _lastUpdate: 0,
 };
 
 const perfOverlay = document.getElementById('perf-overlay');
@@ -257,11 +262,25 @@ const perfInferEl = document.getElementById('perf-infer');
 const perfPostEl = document.getElementById('perf-post');
 const perfDroppedEl = document.getElementById('perf-dropped');
 
-function updatePerfDisplay() {
-  perfFrameEl.textContent = perfMetrics.frameTime.toFixed(1);
-  perfInferEl.textContent = perfMetrics.inferTime.toFixed(1);
-  perfPostEl.textContent = perfMetrics.postTime.toFixed(1);
-  perfDroppedEl.textContent = perfMetrics.dropped;
+function recordPerfSample(timing) {
+  if (!timing) return;
+  const now = performance.now();
+  perfMetrics._frameSamples.push(timing.frame);
+  perfMetrics._inferSamples.push(timing.infer);
+  perfMetrics._postSamples.push(timing.post);
+
+  // Update display once per second
+  if (now - perfMetrics._lastUpdate > 1000) {
+    const avg = arr => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
+    perfFrameEl.textContent = avg(perfMetrics._frameSamples).toFixed(1);
+    perfInferEl.textContent = avg(perfMetrics._inferSamples).toFixed(1);
+    perfPostEl.textContent = avg(perfMetrics._postSamples).toFixed(1);
+    perfDroppedEl.textContent = perfMetrics.dropped;
+    perfMetrics._frameSamples = [];
+    perfMetrics._inferSamples = [];
+    perfMetrics._postSamples = [];
+    perfMetrics._lastUpdate = now;
+  }
 }
 
 function showPerfOverlay() {
@@ -270,6 +289,7 @@ function showPerfOverlay() {
 
 function hidePerfOverlay() {
   perfOverlay.classList.add('hidden');
+  perfMetrics.dropped = 0;
 }
 
 function renderLoop(timestamp) {
@@ -305,12 +325,10 @@ function renderLoop(timestamp) {
         blend: state.blend,
         mirror: state.mirror,
       }).then((timing) => {
-        perfMetrics.frameTime = performance.now() - frameStart;
+        const frameTime = performance.now() - frameStart;
         if (timing) {
-          perfMetrics.inferTime = timing.infer;
-          perfMetrics.postTime = timing.post;
+          recordPerfSample({ frame: frameTime, infer: timing.infer, post: timing.post });
         }
-        updatePerfDisplay();
       }).finally(() => {
         inferenceInProgress = false;
       });
@@ -323,12 +341,10 @@ function renderLoop(timestamp) {
       }
       // JS pipeline path (original)
       processFrame(source).then((timing) => {
-        perfMetrics.frameTime = performance.now() - frameStart;
+        const frameTime = performance.now() - frameStart;
         if (timing) {
-          perfMetrics.inferTime = timing.infer;
-          perfMetrics.postTime = timing.post;
+          recordPerfSample({ frame: frameTime, infer: timing.infer, post: timing.post });
         }
-        updatePerfDisplay();
       }).finally(() => {
         inferenceInProgress = false;
       });

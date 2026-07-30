@@ -279,6 +279,7 @@ export async function processFrameWebGPU(videoSource, session, options = {}) {
   const blend = options.blend ?? 1.0;
   const mirror = options.mirror ?? true;
 
+  try {
   // --- Step 1: Preprocess in JS (same as JS pipeline for identical input) ---
   const inputTensor = preprocessFrame(videoSource, resolution);
   const inputData = inputTensor.data; // Float32Array in NCHW [0,255]
@@ -366,6 +367,12 @@ export async function processFrameWebGPU(videoSource, session, options = {}) {
   const postEnd = performance.now();
 
   return { infer: inferEnd - inferStart, post: postEnd - postStart };
+
+  } catch (err) {
+    // Pipeline was destroyed mid-frame or GPU error — bail gracefully
+    console.warn('[PaintMe WebGPU] Frame aborted:', err.message);
+    return null;
+  }
 }
 
 /**
@@ -376,25 +383,26 @@ export function updateWebGPUSettings(opts) {
 }
 
 /**
- * Clean up WebGPU resources (does NOT destroy the device — allows re-init)
+ * Clean up WebGPU resources. Nulls references so in-flight frames bail out gracefully.
+ * Does NOT call gpuDevice.destroy() — that would crash in-flight GPU operations.
+ * The device is GC'd once all references are dropped.
  */
 export function destroyWebGPUPipeline() {
-  outputTensorBuffer?.destroy();
-  outputRgbaTexture?.destroy();
-  originalTensorBuffer?.destroy();
-  postprocessUniformBuffer?.destroy();
+  // Null out context first so in-flight processFrameWebGPU calls bail at the top
+  gpuContext = null;
+
+  // Destroy buffers/textures (safe even if commands are queued — they'll just error silently)
+  try { outputTensorBuffer?.destroy(); } catch {}
+  try { outputRgbaTexture?.destroy(); } catch {}
+  try { originalTensorBuffer?.destroy(); } catch {}
+  try { postprocessUniformBuffer?.destroy(); } catch {}
 
   outputTensorBuffer = null;
   outputRgbaTexture = null;
   originalTensorBuffer = null;
   postprocessUniformBuffer = null;
 
-  if (gpuContext) {
-    gpuContext.unconfigure();
-    gpuContext = null;
-  }
-
-  gpuDevice?.destroy();
+  // Don't destroy gpuDevice — let GC handle it to avoid crashing in-flight work
   gpuDevice = null;
   canvasEl = null;
 }
