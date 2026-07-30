@@ -384,19 +384,16 @@ export function updateWebGPUSettings(opts) {
 
 /**
  * Clean up WebGPU resources. Nulls references so in-flight frames bail out gracefully.
- * Does NOT call gpuDevice.destroy() — that would crash in-flight GPU operations.
- * The device is GC'd once all references are dropped.
+ * Does NOT call gpuDevice.destroy() or buffer.destroy() — in-flight GPU commands
+ * may still reference them, and destroying causes validation errors that freeze the page.
+ * All resources are GC'd once references are dropped and in-flight work completes.
  */
 export function destroyWebGPUPipeline() {
   // Null out context first so in-flight processFrameWebGPU calls bail at the top
   gpuContext = null;
 
-  // Destroy buffers/textures (safe even if commands are queued — they'll just error silently)
-  try { outputTensorBuffer?.destroy(); } catch {}
-  try { outputRgbaTexture?.destroy(); } catch {}
-  try { originalTensorBuffer?.destroy(); } catch {}
-  try { postprocessUniformBuffer?.destroy(); } catch {}
-
+  // Don't destroy buffers/textures — just drop references
+  // In-flight GPU commands will complete normally, then GC collects everything
   outputTensorBuffer = null;
   outputRgbaTexture = null;
   originalTensorBuffer = null;
