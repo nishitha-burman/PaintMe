@@ -185,7 +185,6 @@ async function handleGPUPipelineToggle(enabled) {
     if (!isWebGPUAvailable()) {
       showProgress('WebGPU not available in this browser', 0);
       setTimeout(() => hideProgress(), 3000);
-      // Uncheck the toggle
       document.getElementById('gpu-pipeline-toggle').checked = false;
       return;
     }
@@ -199,6 +198,10 @@ async function handleGPUPipelineToggle(enabled) {
       gpuCanvas.id = 'gpu-canvas';
       gpuCanvas.width = canvas.width;
       gpuCanvas.height = canvas.height;
+      gpuCanvas.style.display = 'none'; // Hidden until styled frame renders
+      gpuCanvas.style.maxWidth = '100%';
+      gpuCanvas.style.maxHeight = '100%';
+      gpuCanvas.style.borderRadius = 'var(--radius-sm)';
       canvas.parentNode.insertBefore(gpuCanvas, canvas.nextSibling);
     }
 
@@ -206,13 +209,7 @@ async function handleGPUPipelineToggle(enabled) {
     if (success) {
       state.useGPUPipeline = true;
       state.gpuPipelineReady = true;
-      // Hide the old canvas, show GPU canvas
-      canvas.style.display = 'none';
-      gpuCanvas.style.display = 'block';
-      gpuCanvas.style.maxWidth = '100%';
-      gpuCanvas.style.maxHeight = '100%';
-      gpuCanvas.style.borderRadius = 'var(--radius-sm)';
-      showProgress('GPU Pipeline active!', 100);
+      showProgress('GPU Pipeline ready!', 100);
       updateProviderBadge('WebGPU + WebNN');
       setTimeout(() => hideProgress(), 1200);
     } else {
@@ -224,10 +221,10 @@ async function handleGPUPipelineToggle(enabled) {
     // Switch back to JS pipeline
     state.useGPUPipeline = false;
     state.gpuPipelineReady = false;
-    inferenceInProgress = false; // Reset gate to prevent stuck state
+    inferenceInProgress = false;
     destroyWebGPUPipeline();
 
-    // Show old canvas, hide GPU canvas
+    // Show 2D canvas, hide GPU canvas
     canvas.style.display = 'block';
     const gpuCanvas = document.getElementById('gpu-canvas');
     if (gpuCanvas) gpuCanvas.style.display = 'none';
@@ -265,7 +262,13 @@ function renderLoop(timestamp) {
     inferenceInProgress = true;
 
     if (state.useGPUPipeline && state.gpuPipelineReady && !state.useStaticImage) {
-      // WebGPU pipeline path — keeps data on GPU
+      // Show GPU canvas, hide 2D canvas for styled WebGPU rendering
+      const gpuCanvas = document.getElementById('gpu-canvas');
+      if (gpuCanvas && gpuCanvas.style.display === 'none') {
+        gpuCanvas.style.display = 'block';
+        canvas.style.display = 'none';
+      }
+      // WebGPU pipeline path — postprocessing on GPU
       processFrameWebGPU(source, state.session, {
         blend: state.blend,
         mirror: state.mirror,
@@ -273,13 +276,26 @@ function renderLoop(timestamp) {
         inferenceInProgress = false;
       });
     } else {
+      // Show 2D canvas, hide GPU canvas for JS rendering
+      if (state.useGPUPipeline) {
+        const gpuCanvas = document.getElementById('gpu-canvas');
+        if (gpuCanvas) gpuCanvas.style.display = 'none';
+        canvas.style.display = 'block';
+      }
       // JS pipeline path (original)
       processFrame(source).finally(() => {
         inferenceInProgress = false;
       });
     }
   } else if (!state.session || !state.currentStyle) {
-    // No style selected — show raw feed
+    // No style selected — show raw feed on 2D canvas
+    if (state.useGPUPipeline) {
+      const gpuCanvas = document.getElementById('gpu-canvas');
+      if (gpuCanvas && gpuCanvas.style.display !== 'none') {
+        gpuCanvas.style.display = 'none';
+        canvas.style.display = 'block';
+      }
+    }
     drawRawFrame(source);
   }
 
