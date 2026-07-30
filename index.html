@@ -32,6 +32,13 @@
         <span id="provider-badge" class="badge">WASM</span>
         <span id="fps-badge" class="badge">0 FPS</span>
       </div>
+      <!-- Performance metrics overlay -->
+      <div id="perf-overlay" class="perf-overlay hidden">
+        <span>Frame: <b id="perf-frame">-</b>ms</span>
+        <span>Infer: <b id="perf-infer">-</b>ms</span>
+        <span>Post: <b id="perf-post">-</b>ms</span>
+        <span>Dropped: <b id="perf-dropped">0</b></span>
+      </div>
       <!-- Progress bar for model loading -->
       <div id="progress-container" class="progress-container hidden">
         <div id="progress-bar" class="progress-bar"></div>

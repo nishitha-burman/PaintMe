@@ -274,7 +274,7 @@ let originalTensorBuffer = null;
  * @param {object} preprocessing - { preprocessFn, resolution } from the JS pipeline
  */
 export async function processFrameWebGPU(videoSource, session, options = {}) {
-  if (!gpuDevice || !gpuContext) return;
+  if (!gpuDevice || !gpuContext) return null;
 
   const blend = options.blend ?? 1.0;
   const mirror = options.mirror ?? true;
@@ -283,14 +283,18 @@ export async function processFrameWebGPU(videoSource, session, options = {}) {
   const inputTensor = preprocessFrame(videoSource, resolution);
   const inputData = inputTensor.data; // Float32Array in NCHW [0,255]
 
-  // --- Step 2: Run inference (same ONNX session) ---
+  // --- Step 2: Run inference (timed) ---
+  const inferStart = performance.now();
   const inputName = session.inputNames[0];
   const outputName = session.outputNames[0];
   const feeds = { [inputName]: inputTensor };
   const results = await session.run(feeds);
   const outputData = results[outputName].data; // Float32Array in NCHW
+  const inferEnd = performance.now();
 
-  // --- Step 3: Upload both tensors to GPU and run postprocess compute shader ---
+  // --- Step 3: GPU postprocess (timed) ---
+  const postStart = performance.now();
+
   // Ensure original buffer exists
   const tensorByteSize = 3 * resolution * resolution * 4;
   if (!originalTensorBuffer) {
@@ -359,6 +363,9 @@ export async function processFrameWebGPU(videoSource, session, options = {}) {
   renderPass.end();
 
   gpuDevice.queue.submit([encoder.finish()]);
+  const postEnd = performance.now();
+
+  return { infer: inferEnd - inferStart, post: postEnd - postStart };
 }
 
 /**

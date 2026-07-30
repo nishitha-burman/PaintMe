@@ -241,6 +241,36 @@ let lastFrameTime = 0;
 let frameCount = 0;
 let fpsInterval = 0;
 let inferenceInProgress = false;
+let droppedFrames = 0;
+
+// Performance metrics state
+const perfMetrics = {
+  frameTime: 0,
+  inferTime: 0,
+  postTime: 0,
+  dropped: 0,
+};
+
+const perfOverlay = document.getElementById('perf-overlay');
+const perfFrameEl = document.getElementById('perf-frame');
+const perfInferEl = document.getElementById('perf-infer');
+const perfPostEl = document.getElementById('perf-post');
+const perfDroppedEl = document.getElementById('perf-dropped');
+
+function updatePerfDisplay() {
+  perfFrameEl.textContent = perfMetrics.frameTime.toFixed(1);
+  perfInferEl.textContent = perfMetrics.inferTime.toFixed(1);
+  perfPostEl.textContent = perfMetrics.postTime.toFixed(1);
+  perfDroppedEl.textContent = perfMetrics.dropped;
+}
+
+function showPerfOverlay() {
+  perfOverlay.classList.remove('hidden');
+}
+
+function hidePerfOverlay() {
+  perfOverlay.classList.add('hidden');
+}
 
 function renderLoop(timestamp) {
   if (!state.isRunning) return;
@@ -260,6 +290,8 @@ function renderLoop(timestamp) {
 
   if (state.session && state.currentStyle && !inferenceInProgress) {
     inferenceInProgress = true;
+    showPerfOverlay();
+    const frameStart = performance.now();
 
     if (state.useGPUPipeline && state.gpuPipelineReady && !state.useStaticImage) {
       // Show GPU canvas, hide 2D canvas for styled WebGPU rendering
@@ -272,6 +304,13 @@ function renderLoop(timestamp) {
       processFrameWebGPU(source, state.session, {
         blend: state.blend,
         mirror: state.mirror,
+      }).then((timing) => {
+        perfMetrics.frameTime = performance.now() - frameStart;
+        if (timing) {
+          perfMetrics.inferTime = timing.infer;
+          perfMetrics.postTime = timing.post;
+        }
+        updatePerfDisplay();
       }).finally(() => {
         inferenceInProgress = false;
       });
@@ -283,12 +322,23 @@ function renderLoop(timestamp) {
         canvas.style.display = 'block';
       }
       // JS pipeline path (original)
-      processFrame(source).finally(() => {
+      processFrame(source).then((timing) => {
+        perfMetrics.frameTime = performance.now() - frameStart;
+        if (timing) {
+          perfMetrics.inferTime = timing.infer;
+          perfMetrics.postTime = timing.post;
+        }
+        updatePerfDisplay();
+      }).finally(() => {
         inferenceInProgress = false;
       });
     }
+  } else if (state.session && state.currentStyle && inferenceInProgress) {
+    // Frame dropped — inference still in progress
+    perfMetrics.dropped++;
   } else if (!state.session || !state.currentStyle) {
     // No style selected — show raw feed on 2D canvas
+    hidePerfOverlay();
     if (state.useGPUPipeline) {
       const gpuCanvas = document.getElementById('gpu-canvas');
       if (gpuCanvas && gpuCanvas.style.display !== 'none') {
@@ -303,17 +353,21 @@ function renderLoop(timestamp) {
 }
 
 /**
- * Process a single frame through the style transfer model
+ * Process a single frame through the style transfer model (JS pipeline)
+ * Returns timing breakdown: { infer, post }
  */
 async function processFrame(source) {
   try {
     // Preprocess: resize to model input and convert to tensor
     const inputTensor = preprocessFrame(source, state.resolution);
 
-    // Run inference
+    // Run inference (timed)
+    const inferStart = performance.now();
     const outputTensor = await runInference(state.session, inputTensor);
+    const inferEnd = performance.now();
 
-    // Postprocess: convert output tensor back to ImageData
+    // Postprocess: convert output tensor back to ImageData (timed)
+    const postStart = performance.now();
     const styledImageData = postprocessOutput(outputTensor, state.resolution);
 
     // Draw to main canvas with blending
@@ -336,11 +390,14 @@ async function processFrame(source) {
     bitmap.close();
 
     ctx.restore();
+    const postEnd = performance.now();
+
+    return { infer: inferEnd - inferStart, post: postEnd - postStart };
   } catch (err) {
     console.error('Inference error:', err);
-    // Show the error in the UI so user can see what's wrong
     showProgress(`Error: ${err.message}`, 0);
     drawRawFrame(source);
+    return null;
   }
 }
 
