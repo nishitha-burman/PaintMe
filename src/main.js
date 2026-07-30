@@ -6,6 +6,7 @@
 import { createInferenceSession, runInference, getProvider } from './inference.js';
 import { initUI, showProgress, hideProgress, updateProviderBadge, updateFPS } from './ui.js';
 import { preprocessFrame, postprocessOutput, blendFrames } from './utils.js';
+import { isWebGPUAvailable, initWebGPUPipeline, processFrameWebGPU, destroyWebGPUPipeline } from './webgpu-pipeline.js';
 
 // App state
 const state = {
@@ -18,6 +19,8 @@ const state = {
   resolution: 224,
   useStaticImage: false,
   staticImage: null,
+  useGPUPipeline: false,       // Toggle: false = JS pipeline, true = WebGPU pipeline
+  gpuPipelineReady: false,     // Whether WebGPU pipeline initialized successfully
 };
 
 // DOM elements
@@ -46,6 +49,7 @@ function init() {
         handleStyleSelect(state.currentStyle);
       }
     },
+    onGPUPipelineToggle: handleGPUPipelineToggle,
     onSnap: handleSnap,
     onRecord: handleRecord,
   });
@@ -174,6 +178,64 @@ async function handleStyleSelect(styleName) {
 }
 
 /**
+ * Handle GPU Pipeline toggle — initializes or tears down the WebGPU pipeline
+ */
+async function handleGPUPipelineToggle(enabled) {
+  if (enabled) {
+    if (!isWebGPUAvailable()) {
+      showProgress('WebGPU not available in this browser', 0);
+      setTimeout(() => hideProgress(), 3000);
+      // Uncheck the toggle
+      document.getElementById('gpu-pipeline-toggle').checked = false;
+      return;
+    }
+
+    showProgress('Initializing WebGPU pipeline...', 50);
+
+    // Create a separate canvas for WebGPU (WebGPU needs its own context)
+    let gpuCanvas = document.getElementById('gpu-canvas');
+    if (!gpuCanvas) {
+      gpuCanvas = document.createElement('canvas');
+      gpuCanvas.id = 'gpu-canvas';
+      gpuCanvas.width = canvas.width;
+      gpuCanvas.height = canvas.height;
+      canvas.parentNode.insertBefore(gpuCanvas, canvas.nextSibling);
+    }
+
+    const success = await initWebGPUPipeline(gpuCanvas, state.resolution);
+    if (success) {
+      state.useGPUPipeline = true;
+      state.gpuPipelineReady = true;
+      // Hide the old canvas, show GPU canvas
+      canvas.style.display = 'none';
+      gpuCanvas.style.display = 'block';
+      gpuCanvas.style.maxWidth = '100%';
+      gpuCanvas.style.maxHeight = '100%';
+      gpuCanvas.style.borderRadius = 'var(--radius-sm)';
+      showProgress('GPU Pipeline active!', 100);
+      updateProviderBadge('WebGPU + WebNN');
+      setTimeout(() => hideProgress(), 1200);
+    } else {
+      showProgress('WebGPU pipeline init failed — using JS pipeline', 0);
+      setTimeout(() => hideProgress(), 3000);
+      document.getElementById('gpu-pipeline-toggle').checked = false;
+    }
+  } else {
+    // Switch back to JS pipeline
+    state.useGPUPipeline = false;
+    state.gpuPipelineReady = false;
+    destroyWebGPUPipeline();
+
+    // Show old canvas, hide GPU canvas
+    canvas.style.display = 'block';
+    const gpuCanvas = document.getElementById('gpu-canvas');
+    if (gpuCanvas) gpuCanvas.style.display = 'none';
+
+    updateProviderBadge(getProvider());
+  }
+}
+
+/**
  * Main render loop — runs inference on each frame.
  * Uses a flag to prevent overlapping inference calls (since inference is async).
  */
@@ -199,16 +261,26 @@ function renderLoop(timestamp) {
   const source = state.useStaticImage ? state.staticImage : webcam;
 
   if (state.session && state.currentStyle && !inferenceInProgress) {
-    // Run style transfer inference (async, but we gate on the flag)
     inferenceInProgress = true;
-    processFrame(source).finally(() => {
-      inferenceInProgress = false;
-    });
+
+    if (state.useGPUPipeline && state.gpuPipelineReady && !state.useStaticImage) {
+      // WebGPU pipeline path — keeps data on GPU
+      processFrameWebGPU(source, state.session, {
+        blend: state.blend,
+        mirror: state.mirror,
+      }).finally(() => {
+        inferenceInProgress = false;
+      });
+    } else {
+      // JS pipeline path (original)
+      processFrame(source).finally(() => {
+        inferenceInProgress = false;
+      });
+    }
   } else if (!state.session || !state.currentStyle) {
     // No style selected — show raw feed
     drawRawFrame(source);
   }
-  // If inference is in progress, we skip this frame (canvas keeps showing previous result)
 
   requestAnimationFrame(renderLoop);
 }

@@ -58,6 +58,12 @@ export function initUI(handlers) {
     handlers.onResolutionToggle(e.target.checked);
   });
 
+  // GPU Pipeline toggle
+  const gpuPipelineToggle = document.getElementById('gpu-pipeline-toggle');
+  gpuPipelineToggle.addEventListener('change', (e) => {
+    handlers.onGPUPipelineToggle(e.target.checked);
+  });
+
   // Snap button
   snapBtn.addEventListener('click', handlers.onSnap);
 
