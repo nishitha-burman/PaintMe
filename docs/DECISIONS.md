@@ -130,3 +130,39 @@ This document captures key architectural and technology choices made during Pain
 - **Cross-browser** — WebM recording works in Chrome, Edge, and Firefox.
 
 **Limitation**: Safari doesn't support WebM recording. A future enhancement could detect Safari and offer frame-by-frame GIF export instead.
+
+---
+
+## Why WebGPU Postprocessing Only (not full GPU pipeline)?
+
+**Decision**: The GPU Pipeline toggle moves only postprocessing to WebGPU compute shaders. Preprocessing and inference stay on CPU/ONNX Runtime.
+
+**Rationale**:
+- **MLTensor not available yet** — True zero-copy (WebNN output → GPUBuffer) requires `MLContext.exportToGPU()` which is behind experimental flags in Edge Canary and not yet stable.
+- **Preprocess must match exactly** — Any difference in preprocessing (resize algorithm, normalization) produces visually different results. Keeping JS preprocessing ensures identical inputs regardless of pipeline toggle.
+- **Postprocess is the bottleneck we can solve today** — The JS postprocessing path involves a pixel-by-pixel loop + `createImageBitmap` + `putImageData`. A compute shader does NCHW→RGBA, blend, and mirror in a single GPU dispatch.
+- **Safe A/B comparison** — With identical preprocess + inference, users can toggle between pipelines and see the postprocessing performance difference in isolation.
+
+**Future**: When `exportToGPU` and `MLContext.createTensor(GPUBuffer)` are stable, the full pipeline can stay on GPU end-to-end.
+
+---
+
+## Why setTimeout for Toggle-Off Safety (GPU Pipeline)?
+
+**Decision**: When the GPU Pipeline toggle is disabled, we call `setTimeout(() => inferenceInProgress = false, 100)` as a safety net.
+
+**Rationale**:
+- **In-flight promises** — Toggling off mid-inference means a GPU-path promise is still running. If that promise's `.then()` throws (because GPU resources were nulled), `inferenceInProgress` stays `true` forever, freezing the render loop.
+- **No `gpuDevice.destroy()`** — Originally we called `gpuDevice.destroy()` on toggle-off, but this immediately invalidates all GPU objects and causes WebGPU errors in any in-flight work. Nulling references and letting GC collect the device avoids these crashes.
+- **100ms is conservative** — Long enough for any pending rAF callback to fire and hit the null-check guard, short enough to feel instant to the user.
+
+---
+
+## Why Rolling Averages for Performance Metrics?
+
+**Decision**: Display performance numbers as rolling 1-second averages rather than per-frame values.
+
+**Rationale**:
+- **Readability** — Per-frame numbers change every 30-60ms, making them impossible to read. A 1-second rolling average gives stable, readable values.
+- **Meaningful comparison** — When toggling between JS and GPU pipelines, users can see steady numbers for each mode instead of a blur of changing digits.
+- **Low overhead** — Simply accumulate samples into an array, compute mean every 1000ms, and reset.

@@ -50,6 +50,7 @@ function init() {
       }
     },
     onGPUPipelineToggle: handleGPUPipelineToggle,
+    onCameraToggle: handleCameraToggle,
     onSnap: handleSnap,
     onRecord: handleRecord,
   });
@@ -88,6 +89,38 @@ async function startCamera() {
     // Show drop zone more prominently
     dropZone.style.borderColor = 'var(--accent)';
     dropZone.querySelector('span').textContent = 'Camera unavailable — drop an image instead';
+  }
+}
+
+/**
+ * Handle camera toggle — stops/restarts the camera stream
+ */
+function handleCameraToggle(enabled) {
+  if (!enabled) {
+    // Stop camera
+    if (state.stream) {
+      state.stream.getTracks().forEach(track => track.stop());
+    }
+    state.isRunning = false;
+    webcam.srcObject = null;
+    // Clear the canvas to black
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  } else {
+    // Restart camera
+    navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' }
+    }).then((stream) => {
+      state.stream = stream;
+      webcam.srcObject = stream;
+      return webcam.play();
+    }).then(() => {
+      state.isRunning = true;
+      requestAnimationFrame(renderLoop);
+    }).catch((err) => {
+      console.error('Failed to restart camera:', err);
+      document.getElementById('camera-toggle').checked = false;
+    });
   }
 }
 

@@ -54,6 +54,10 @@ Share → "I need to save this and show people"
 | Drag-and-drop fallback | P1 | ✅ |
 | Progress bar for download | P1 | ✅ |
 | Dark glassmorphism UI | P2 | ✅ |
+| GPU Pipeline toggle | P1 | ✅ |
+| Performance metrics overlay | P1 | ✅ |
+| Camera toggle | P1 | ✅ |
+| Version badge | P2 | ✅ |
 
 ### Future Enhancements
 

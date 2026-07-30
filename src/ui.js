@@ -64,6 +64,12 @@ export function initUI(handlers) {
     handlers.onGPUPipelineToggle(e.target.checked);
   });
 
+  // Camera toggle
+  const cameraToggle = document.getElementById('camera-toggle');
+  cameraToggle.addEventListener('change', (e) => {
+    handlers.onCameraToggle(e.target.checked);
+  });
+
   // Snap button
   snapBtn.addEventListener('click', handlers.onSnap);
 

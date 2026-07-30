@@ -9,7 +9,7 @@
 <body>
   <!-- Landing overlay shown before camera starts -->
   <div id="landing" class="landing">
-    <span class="version-badge version-badge--landing">v2.1</span>
+    <span class="version-badge version-badge--landing">v2.2</span>
     <div class="landing-content">
       <h1 class="landing-title">🎨 PaintMe</h1>
       <p class="landing-subtitle">Transform your camera feed into living art using neural style transfer — powered by WebNN</p>
@@ -29,7 +29,7 @@
       <video id="webcam" autoplay playsinline muted></video>
       <canvas id="output-canvas"></canvas>
       <!-- Version badge -->
-      <span class="version-badge">v2.1</span>
+      <span class="version-badge">v2.2</span>
       <!-- Status badges -->
       <div class="status-bar">
         <span id="provider-badge" class="badge">WASM</span>
@@ -72,6 +72,10 @@
       <div class="control-group">
         <label for="gpu-pipeline-toggle">GPU Pipeline</label>
         <input type="checkbox" id="gpu-pipeline-toggle" />
+      </div>
+      <div class="control-group">
+        <label for="camera-toggle">Camera</label>
+        <input type="checkbox" id="camera-toggle" checked />
       </div>
       <div class="control-buttons">
         <button id="snap-btn" class="action-btn" title="Save frame as PNG">📸 Snap</button>
