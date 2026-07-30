@@ -165,6 +165,13 @@ body {
   color: var(--text-secondary);
 }
 
+.version-badge--landing {
+  bottom: 1.5rem;
+  right: 1.5rem;
+  top: auto;
+  left: auto;
+}
+
 .status-bar {
   position: absolute;
   top: 1rem;
