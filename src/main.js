@@ -221,13 +221,18 @@ async function handleGPUPipelineToggle(enabled) {
     // Switch back to JS pipeline
     state.useGPUPipeline = false;
     state.gpuPipelineReady = false;
-    inferenceInProgress = false;
     destroyWebGPUPipeline();
 
     // Show 2D canvas, hide GPU canvas
     canvas.style.display = 'block';
     const gpuCanvas = document.getElementById('gpu-canvas');
     if (gpuCanvas) gpuCanvas.style.display = 'none';
+
+    // Force-reset inference gate after a short delay to ensure any in-flight
+    // GPU frame's promise has resolved/rejected before we unblock
+    setTimeout(() => {
+      inferenceInProgress = false;
+    }, 100);
 
     updateProviderBadge(getProvider());
   }
@@ -329,6 +334,8 @@ function renderLoop(timestamp) {
         if (timing) {
           recordPerfSample({ frame: frameTime, infer: timing.infer, post: timing.post });
         }
+      }).catch(() => {
+        // GPU pipeline was torn down mid-frame — ignore
       }).finally(() => {
         inferenceInProgress = false;
       });
