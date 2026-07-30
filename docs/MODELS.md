@@ -29,14 +29,16 @@ Reference: *"Perceptual Losses for Real-Time Style Transfer and Super-Resolution
 
 **Important**: The model expects RGB channel order (not BGR). Pixel values are in [0, 255] range — NOT normalized to [0, 1].
 
-## Supported Resolutions
+## Supported Resolution
 
-| Resolution | File naming | Use case |
-|------------|-------------|----------|
-| 256×256 | `{style}_256.onnx` | Real-time (default, 25-30 FPS) |
-| 512×512 | `{style}_512.onnx` | High detail (10-15 FPS) |
+The current ONNX Model Zoo models have **fixed 224×224 input shapes**. The app hardcodes resolution to 224.
 
-Models are resolution-specific. While the architecture technically supports dynamic input sizes, using fixed-size models enables better optimization by the execution provider.
+| Resolution | Status | Notes |
+|------------|--------|-------|
+| 224×224 | ✅ Active | Fixed input shape from ONNX Model Zoo models |
+| 448×448+ | ⏸️ Future | Requires re-exporting models with dynamic shapes |
+
+The Hi-Res toggle in the UI is hidden until multi-resolution models are available.
 
 ## How to Source Models
 

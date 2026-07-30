@@ -47,7 +47,7 @@ Share → "I need to save this and show people"
 | IndexedDB model caching | P0 | ✅ |
 | Blend slider | P1 | ✅ |
 | Mirror toggle | P1 | ✅ |
-| Resolution toggle | P1 | ✅ |
+| Resolution toggle | P1 | ⏸️ Hidden (models are fixed 224×224) |
 | Snap to PNG | P1 | ✅ |
 | Record to WebM | P1 | ✅ |
 | FPS + provider badges | P1 | ✅ |

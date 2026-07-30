@@ -43,7 +43,7 @@ PaintMe is a client-side web application that performs real-time neural style tr
 │  │  Frame   │    │ (utils.js)   │    │(inference.js) │          │
 │  └──────────┘    │              │    │               │          │
 │                  │ - Resize to  │    │ - Feed tensor │          │
-│                  │   256/512    │    │ - Run session │          │
+│                  │   224x224    │    │ - Run session │          │
 │                  │ - Center crop│    │ - WebNN/WASM  │          │
 │                  │ - RGBA→NCHW  │    │               │          │
 │                  └──────────────┘    └───────┬───────┘          │
@@ -172,15 +172,14 @@ When a style is active, a performance overlay displays rolling 1-second averages
 - **Frame** — Total end-to-end time per styled frame (ms)
 - **Infer** — Time spent in ONNX Runtime `session.run()` (ms)
 - **Post** — Time for postprocessing + canvas draw (ms) — key differentiator between pipelines
-- **Dropped** — Frames where `requestAnimationFrame` fired but inference was still busy
+- **Dropped** — Frames where `requestAnimationFrame` fired but inference was still busy (shown as per-second rate, e.g. `3/s`)
 
 This allows direct A/B comparison between JS and WebGPU pipelines.
 
-## Resolution Modes
+## Resolution
 
 | Mode | Input Size | Speed | Quality |
 |------|-----------|-------|---------|
-| Fast (default) | 224×224 | 5-30 FPS | Good for real-time |
-| Detailed | 448×448 | 2-15 FPS | Better detail, slower |
+| Default | 224×224 | 15-30 FPS | Good for real-time |
 
-The resolution toggle reloads the model at the new size (models are resolution-specific for optimal performance).
+The current ONNX Model Zoo style transfer models have fixed 224×224 input shapes. The Hi-Res toggle is hidden until multi-resolution models are available. Resolution is hardcoded to 224 in application state.

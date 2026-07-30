@@ -75,17 +75,20 @@ This document captures key architectural and technology choices made during Pain
 
 ---
 
-## Why 256×256 as Default Resolution?
+## Why 224×224 Fixed Resolution?
 
-**Decision**: Default to 256×256 input resolution, with optional 512×512 "detailed" mode.
+**Decision**: Use 224×224 fixed input resolution. The Hi-Res toggle is hidden because the ONNX Model Zoo models have static input shapes.
 
 **Rationale**:
-- **Real-time performance** — 256×256 achieves 25-30 FPS on mid-range hardware with WASM. 512×512 drops to 10-15 FPS.
-- **Style transfer sweet spot** — Style transfer models capture patterns at a scale where 256px is sufficient for the artistic effect. Higher resolution doesn't dramatically improve perceived quality.
-- **Memory budget** — Input tensor at 256×256×3 = 192 KB. At 512×512×3 = 768 KB. Smaller tensors mean faster memory copies and better cache behavior.
-- **Low-end device support** — Automatically gives acceptable performance on phones and older laptops.
+- **Model constraint** — The ONNX Model Zoo style transfer models (mosaic, candy, rain_princess, etc.) are exported with fixed 224×224 input dimensions. Feeding 448×448 causes an `OrtRun` dimension mismatch error.
+- **Real-time performance** — 224×224 achieves 15-30 FPS on mid-range hardware with WASM.
+- **Memory budget** — Input tensor at 224×224×3 = 150 KB. Small tensors mean faster memory copies and better cache behavior.
 
-**The tradeoff**: 256px output stretched to a 640px canvas can look soft. The "detailed" toggle gives users the choice of trading speed for sharpness.
+**The tradeoff**: 224px output stretched to a 640px canvas can look soft. Multi-resolution support requires re-exporting models with dynamic input shapes or sourcing higher-resolution variants.
+
+**When we'd re-enable the toggle**:
+- If we source or re-export models with dynamic input dimensions
+- If higher-resolution pre-trained models become available in the ONNX Model Zoo
 
 ---
 

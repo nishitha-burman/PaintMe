@@ -16,7 +16,8 @@ Transform your webcam feed into living art — Starry Night, The Scream, Mosaic,
 - 📱 **Responsive** — Works on desktop and mobile browsers
 - 💾 **Offline-ready** — Models cached in IndexedDB after first download
 - 📸 **Snap & Record** — Save styled frames as PNG or record WebM video
-- 🎛️ **Controls** — Blend slider, mirror mode, resolution toggle
+- 🎛️ **Controls** — Blend slider, mirror mode, camera toggle
+- 🖥️ **GPU Pipeline** — Optional WebGPU postprocessing path with A/B perf metrics
 
 ## 🚀 Quick Start
 
