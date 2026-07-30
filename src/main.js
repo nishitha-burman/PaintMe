@@ -6,7 +6,7 @@
 import { createInferenceSession, runInference, getProvider } from './inference.js';
 import { initUI, showProgress, hideProgress, updateProviderBadge, updateFPS } from './ui.js';
 import { preprocessFrame, postprocessOutput, blendFrames } from './utils.js';
-import { isWebGPUAvailable, initWebGPUPipeline, processFrameWebGPU, destroyWebGPUPipeline } from './webgpu-pipeline.js';
+import { isWebGPUAvailable, initWebGPUPipeline, processFrameWebGPU } from './webgpu-pipeline.js';
 
 // App state
 const state = {
@@ -207,10 +207,19 @@ async function handleStyleSelect(styleName) {
 }
 
 /**
- * Handle GPU Pipeline toggle — initializes or tears down the WebGPU pipeline
+ * Handle GPU Pipeline toggle.
+ * Initializes WebGPU on first enable. Never destroys — just swaps which canvas is visible.
+ * This avoids all race conditions from tearing down GPU resources mid-frame.
  */
 async function handleGPUPipelineToggle(enabled) {
   if (enabled) {
+    // If already initialized, just flip the flag — no re-init needed
+    if (state.gpuPipelineReady) {
+      state.useGPUPipeline = true;
+      updateProviderBadge('WebGPU + WebNN');
+      return;
+    }
+
     if (!isWebGPUAvailable()) {
       showProgress('WebGPU not available in this browser', 0);
       setTimeout(() => hideProgress(), 3000);
@@ -227,7 +236,7 @@ async function handleGPUPipelineToggle(enabled) {
       gpuCanvas.id = 'gpu-canvas';
       gpuCanvas.width = canvas.width;
       gpuCanvas.height = canvas.height;
-      gpuCanvas.style.display = 'none'; // Hidden until styled frame renders
+      gpuCanvas.style.display = 'none';
       gpuCanvas.style.maxWidth = '100%';
       gpuCanvas.style.maxHeight = '100%';
       gpuCanvas.style.borderRadius = 'var(--radius-sm)';
@@ -247,20 +256,13 @@ async function handleGPUPipelineToggle(enabled) {
       document.getElementById('gpu-pipeline-toggle').checked = false;
     }
   } else {
-    // Switch back to JS pipeline — wait for any in-flight frame to finish first
+    // Just flip the flag — no teardown, no resource destruction
     state.useGPUPipeline = false;
-    state.gpuPipelineReady = false;
 
-    // Show 2D canvas, hide GPU canvas immediately
+    // Swap canvases
     canvas.style.display = 'block';
     const gpuCanvas = document.getElementById('gpu-canvas');
     if (gpuCanvas) gpuCanvas.style.display = 'none';
-
-    // Delay teardown so in-flight GPU frame can complete without crashing
-    setTimeout(() => {
-      destroyWebGPUPipeline();
-      inferenceInProgress = false;
-    }, 200);
 
     updateProviderBadge(getProvider());
   }
@@ -348,7 +350,11 @@ function renderLoop(timestamp) {
     showPerfOverlay();
     const frameStart = performance.now();
 
-    if (state.useGPUPipeline && state.gpuPipelineReady && !state.useStaticImage) {
+    // Capture which pipeline to use at the START of this frame
+    // (so toggling mid-frame doesn't cause issues)
+    const useGPU = state.useGPUPipeline && state.gpuPipelineReady && !state.useStaticImage;
+
+    if (useGPU) {
       // Show GPU canvas, hide 2D canvas for styled WebGPU rendering
       const gpuCanvas = document.getElementById('gpu-canvas');
       if (gpuCanvas && gpuCanvas.style.display === 'none') {
@@ -364,16 +370,16 @@ function renderLoop(timestamp) {
         if (timing) {
           recordPerfSample({ frame: frameTime, infer: timing.infer, post: timing.post });
         }
-      }).catch(() => {
-        // GPU pipeline was torn down mid-frame — ignore
+      }).catch((err) => {
+        console.warn('[PaintMe] GPU frame error:', err.message);
       }).finally(() => {
         inferenceInProgress = false;
       });
     } else {
       // Show 2D canvas, hide GPU canvas for JS rendering
-      if (state.useGPUPipeline) {
-        const gpuCanvas = document.getElementById('gpu-canvas');
-        if (gpuCanvas) gpuCanvas.style.display = 'none';
+      const gpuCanvas = document.getElementById('gpu-canvas');
+      if (gpuCanvas && gpuCanvas.style.display !== 'none') {
+        gpuCanvas.style.display = 'none';
         canvas.style.display = 'block';
       }
       // JS pipeline path (original)
