@@ -42,12 +42,8 @@ function init() {
     onStyleSelect: handleStyleSelect,
     onBlendChange: (value) => { state.blend = value / 100; },
     onMirrorToggle: (checked) => { state.mirror = checked; },
-    onResolutionToggle: (checked) => {
-      state.resolution = checked ? 448 : 224;
-      // Reload model at new resolution if one is active
-      if (state.currentStyle) {
-        handleStyleSelect(state.currentStyle);
-      }
+    onResolutionToggle: (_checked) => {
+      // Disabled: ONNX Model Zoo style transfer models have fixed 224×224 input
     },
     onGPUPipelineToggle: handleGPUPipelineToggle,
     onCameraToggle: handleCameraToggle,
