@@ -224,6 +224,7 @@ async function handleGPUPipelineToggle(enabled) {
     // Switch back to JS pipeline
     state.useGPUPipeline = false;
     state.gpuPipelineReady = false;
+    inferenceInProgress = false; // Reset gate to prevent stuck state
     destroyWebGPUPipeline();
 
     // Show old canvas, hide GPU canvas

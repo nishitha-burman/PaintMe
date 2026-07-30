@@ -1,8 +1,16 @@
 /**
  * PaintMe — WebGPU Pipeline
- * Full GPU pipeline: camera → WebGPU preprocess → WebNN inference → WebGPU postprocess → canvas
- * Keeps frame data on the GPU to minimize CPU/JS involvement and improve FPS + battery life.
+ * 
+ * Strategy: Use WebGPU for postprocessing (NCHW→RGBA + blend + mirror + render to canvas).
+ * Preprocessing stays in JS because ONNX Runtime needs CPU-accessible tensor data anyway.
+ * This avoids the expensive JS pixel loop in postprocessing and renders directly to a
+ * WebGPU canvas without createImageBitmap/putImageData overhead.
+ * 
+ * When MLTensor + exportToGPU becomes available (behind WebNN flag in Edge Canary),
+ * the full zero-copy path (GPU preprocess → WebNN inference → GPU postprocess) can be enabled.
  */
+
+import { preprocessFrame } from './utils.js';
 
 // ============================================================
 // State
@@ -10,36 +18,22 @@
 
 let gpuDevice = null;
 let gpuContext = null;
-let mlContext = null;
+let canvasEl = null;
 
 // Pipelines
-let preprocessPipeline = null;
 let postprocessPipeline = null;
 let renderPipeline = null;
 
 // Buffers and textures
-let inputTensorBuffer = null;   // GPUBuffer for preprocessed NCHW data (input to WebNN)
-let outputTensorBuffer = null;  // GPUBuffer for WebNN output (NCHW)
+let outputTensorBuffer = null;  // GPUBuffer for model output (NCHW float32)
 let outputRgbaTexture = null;   // GPU texture after postprocessing (RGBA)
 let sampler = null;
 
-// WebNN tensors
-let inputMLTensor = null;
-let outputMLTensor = null;
-
-// Uniform buffers
-let preprocessUniformBuffer = null;
+// Uniform buffer for postprocess params
 let postprocessUniformBuffer = null;
-
-// Bind groups
-let preprocessBindGroup = null;
-let postprocessBindGroup = null;
-let renderBindGroup = null;
 
 // Config
 let resolution = 224;
-let blendFactor = 1.0;
-let mirrorEnabled = true;
 
 /**
  * Check if WebGPU is available
@@ -55,7 +49,6 @@ export async function isMLTensorAvailable() {
   if (!('ml' in navigator)) return false;
   try {
     const ctx = await navigator.ml.createContext({ deviceType: 'gpu' });
-    // Check if createTensor exists
     return typeof ctx.createTensor === 'function';
   } catch {
     return false;
@@ -70,41 +63,37 @@ export async function isMLTensorAvailable() {
  */
 export async function initWebGPUPipeline(canvas, res = 224) {
   resolution = res;
+  canvasEl = canvas;
 
   try {
-    // 1. Get WebGPU adapter and device
     const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
     if (!adapter) throw new Error('No WebGPU adapter found');
 
     gpuDevice = await adapter.requestDevice();
 
-    // 2. Configure canvas context for WebGPU rendering
+    // Configure canvas context for WebGPU rendering
     gpuContext = canvas.getContext('webgpu');
     const format = navigator.gpu.getPreferredCanvasFormat();
     gpuContext.configure({
       device: gpuDevice,
       format,
-      alphaMode: 'premultiplied',
+      alphaMode: 'opaque',
     });
 
-    // 3. Create WebNN ML context with GPU device type
-    mlContext = await navigator.ml.createContext({ deviceType: 'gpu' });
-
-    // 4. Create shader pipelines
-    createPreprocessPipeline();
+    // Create shader pipelines
     createPostprocessPipeline();
     createRenderPipeline(format);
 
-    // 5. Allocate persistent buffers
+    // Allocate persistent buffers
     allocateBuffers();
 
-    // 6. Create sampler for rendering
+    // Create sampler for rendering
     sampler = gpuDevice.createSampler({
       magFilter: 'linear',
       minFilter: 'linear',
     });
 
-    console.log('[PaintMe WebGPU] Pipeline initialized successfully');
+    console.log('[PaintMe WebGPU] Pipeline initialized — GPU postprocessing active');
     return true;
   } catch (err) {
     console.error('[PaintMe WebGPU] Initialization failed:', err);
@@ -116,31 +105,19 @@ export async function initWebGPUPipeline(canvas, res = 224) {
  * Allocate GPU buffers for the pipeline
  */
 function allocateBuffers() {
-  const tensorSize = 1 * 3 * resolution * resolution * 4; // float32 bytes
+  const tensorSize = 3 * resolution * resolution * 4; // float32 bytes for NCHW
 
-  // Buffer for preprocessed input (NCHW float32)
-  inputTensorBuffer = gpuDevice.createBuffer({
-    size: tensorSize,
-    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
-  });
-
-  // Buffer for model output (NCHW float32)
+  // Buffer for model output (NCHW float32) — written from CPU after inference
   outputTensorBuffer = gpuDevice.createBuffer({
     size: tensorSize,
-    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
   });
 
   // Texture for postprocessed RGBA output
   outputRgbaTexture = gpuDevice.createTexture({
     size: [resolution, resolution],
     format: 'rgba8unorm',
-    usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT,
-  });
-
-  // Uniform buffer for preprocess params (resolution as u32)
-  preprocessUniformBuffer = gpuDevice.createBuffer({
-    size: 16, // 4 u32s padded
-    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING,
   });
 
   // Uniform buffer for postprocess params (resolution, blend, mirror)
@@ -151,65 +128,16 @@ function allocateBuffers() {
 }
 
 // ============================================================
-// Preprocess Compute Shader
-// Takes a camera frame texture → outputs NCHW float32 buffer
-// ============================================================
-
-function createPreprocessPipeline() {
-  const shaderCode = /* wgsl */`
-    @group(0) @binding(0) var inputTexture: texture_external;
-    @group(0) @binding(1) var<storage, read_write> outputBuffer: array<f32>;
-    @group(0) @binding(2) var<uniform> params: vec4<u32>; // x = resolution
-
-    @compute @workgroup_size(16, 16)
-    fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-      let res = params.x;
-      let x = gid.x;
-      let y = gid.y;
-
-      if (x >= res || y >= res) {
-        return;
-      }
-
-      // Sample the external texture at this pixel
-      let texCoord = vec2<u32>(x, y);
-      let pixel = textureLoad(inputTexture, texCoord);
-
-      // Convert to [0, 255] range and write in NCHW planar format
-      let pixelIdx = y * res + x;
-      let planeSize = res * res;
-
-      // R channel (plane 0)
-      outputBuffer[pixelIdx] = pixel.r * 255.0;
-      // G channel (plane 1)
-      outputBuffer[planeSize + pixelIdx] = pixel.g * 255.0;
-      // B channel (plane 2)
-      outputBuffer[2u * planeSize + pixelIdx] = pixel.b * 255.0;
-    }
-  `;
-
-  const shaderModule = gpuDevice.createShaderModule({ code: shaderCode });
-
-  preprocessPipeline = gpuDevice.createComputePipeline({
-    layout: 'auto',
-    compute: {
-      module: shaderModule,
-      entryPoint: 'main',
-    },
-  });
-}
-
-// ============================================================
 // Postprocess Compute Shader
 // Takes NCHW float32 buffer → outputs RGBA texture
-// Applies blend with original and optional mirror
+// Applies blend with original feed and optional mirror
 // ============================================================
 
 function createPostprocessPipeline() {
   const shaderCode = /* wgsl */`
-    @group(0) @binding(0) var<storage, read> inputBuffer: array<f32>;
+    @group(0) @binding(0) var<storage, read> styledBuffer: array<f32>;
     @group(0) @binding(1) var outputTexture: texture_storage_2d<rgba8unorm, write>;
-    @group(0) @binding(2) var originalTexture: texture_external;
+    @group(0) @binding(2) var<storage, read> originalBuffer: array<f32>;
     @group(0) @binding(3) var<uniform> params: PostprocessParams;
 
     struct PostprocessParams {
@@ -229,31 +157,32 @@ function createPostprocessPipeline() {
         return;
       }
 
-      // Read styled pixel from NCHW buffer
       let pixelIdx = y * res + x;
       let planeSize = res * res;
 
-      let r = clamp(inputBuffer[pixelIdx] / 255.0, 0.0, 1.0);
-      let g = clamp(inputBuffer[planeSize + pixelIdx] / 255.0, 0.0, 1.0);
-      let b = clamp(inputBuffer[2u * planeSize + pixelIdx] / 255.0, 0.0, 1.0);
-      let styled = vec4<f32>(r, g, b, 1.0);
+      // Read styled pixel from NCHW output — clamp to [0,255] then normalize to [0,1]
+      let sr = clamp(styledBuffer[pixelIdx], 0.0, 255.0) / 255.0;
+      let sg = clamp(styledBuffer[planeSize + pixelIdx], 0.0, 255.0) / 255.0;
+      let sb = clamp(styledBuffer[2u * planeSize + pixelIdx], 0.0, 255.0) / 255.0;
 
-      // Read original pixel
-      var sampleX = x;
-      if (params.mirror == 1u) {
-        sampleX = res - 1u - x;
-      }
-      let original = textureLoad(originalTexture, vec2<u32>(sampleX, y));
+      // Read original pixel from NCHW input (same format, [0,255])
+      let or_ = clamp(originalBuffer[pixelIdx], 0.0, 255.0) / 255.0;
+      let og = clamp(originalBuffer[planeSize + pixelIdx], 0.0, 255.0) / 255.0;
+      let ob = clamp(originalBuffer[2u * planeSize + pixelIdx], 0.0, 255.0) / 255.0;
 
-      // Blend
-      let blended = mix(original, styled, params.blend);
+      // Blend styled with original
+      let blend = params.blend;
+      let r = mix(or_, sr, blend);
+      let g = mix(og, sg, blend);
+      let b = mix(ob, sb, blend);
 
-      // Write output with mirror applied
+      // Apply mirror (horizontal flip) for output position
       var outX = x;
       if (params.mirror == 1u) {
         outX = res - 1u - x;
       }
-      textureStore(outputTexture, vec2<u32>(outX, y), blended);
+
+      textureStore(outputTexture, vec2<u32>(outX, y), vec4<f32>(r, g, b, 1.0));
     }
   `;
 
@@ -269,8 +198,7 @@ function createPostprocessPipeline() {
 }
 
 // ============================================================
-// Render Pipeline
-// Draws the postprocessed texture to the canvas
+// Render Pipeline — draws postprocessed texture to canvas
 // ============================================================
 
 function createRenderPipeline(format) {
@@ -285,7 +213,6 @@ function createRenderPipeline(format) {
 
     @vertex
     fn vs_main(@builtin(vertex_index) idx: u32) -> VertexOutput {
-      // Full-screen triangle (3 vertices cover the viewport)
       var positions = array<vec2<f32>, 6>(
         vec2<f32>(-1.0, -1.0),
         vec2<f32>( 1.0, -1.0),
@@ -332,142 +259,83 @@ function createRenderPipeline(format) {
 }
 
 // ============================================================
-// WebNN Tensor Management
-// ============================================================
-
-/**
- * Create WebNN MLTensors for input and output
- */
-async function ensureMLTensors() {
-  if (inputMLTensor && outputMLTensor) return;
-
-  const tensorDesc = {
-    dataType: 'float32',
-    shape: [1, 3, resolution, resolution],
-    writable: true,
-    readable: true,
-  };
-
-  inputMLTensor = await mlContext.createTensor(tensorDesc);
-  outputMLTensor = await mlContext.createTensor(tensorDesc);
-}
-
-// ============================================================
 // Frame Processing
 // ============================================================
 
+// Persistent buffer for original frame (avoids re-creating per frame)
+let originalTensorBuffer = null;
+
 /**
- * Process a single frame through the full WebGPU pipeline
+ * Process a single frame: JS preprocess → ONNX inference → GPU postprocess → GPU render
+ * 
  * @param {HTMLVideoElement} videoSource - Camera video element
- * @param {object} session - ONNX Runtime inference session (WebNN)
+ * @param {object} session - ONNX Runtime inference session
  * @param {object} options - { blend: 0-1, mirror: boolean }
+ * @param {object} preprocessing - { preprocessFn, resolution } from the JS pipeline
  */
 export async function processFrameWebGPU(videoSource, session, options = {}) {
   if (!gpuDevice || !gpuContext) return;
 
-  blendFactor = options.blend ?? 1.0;
-  mirrorEnabled = options.mirror ?? true;
+  const blend = options.blend ?? 1.0;
+  const mirror = options.mirror ?? true;
 
-  await ensureMLTensors();
+  // --- Step 1: Preprocess in JS (same as JS pipeline for identical input) ---
+  const inputTensor = preprocessFrame(videoSource, resolution);
+  const inputData = inputTensor.data; // Float32Array in NCHW [0,255]
 
-  const commandEncoder = gpuDevice.createCommandEncoder();
-
-  // --- Step 1: Preprocess (camera → NCHW buffer) ---
-  const videoTexture = gpuDevice.importExternalTexture({ source: videoSource });
-
-  // Update preprocess uniforms
-  gpuDevice.queue.writeBuffer(preprocessUniformBuffer, 0, new Uint32Array([resolution, 0, 0, 0]));
-
-  const preprocessBG = gpuDevice.createBindGroup({
-    layout: preprocessPipeline.getBindGroupLayout(0),
-    entries: [
-      { binding: 0, resource: videoTexture },
-      { binding: 1, resource: { buffer: inputTensorBuffer } },
-      { binding: 2, resource: { buffer: preprocessUniformBuffer } },
-    ],
-  });
-
-  const preprocessPass = commandEncoder.beginComputePass();
-  preprocessPass.setPipeline(preprocessPipeline);
-  preprocessPass.setBindGroup(0, preprocessBG);
-  preprocessPass.dispatchWorkgroups(
-    Math.ceil(resolution / 16),
-    Math.ceil(resolution / 16)
-  );
-  preprocessPass.end();
-
-  gpuDevice.queue.submit([commandEncoder.finish()]);
-  await gpuDevice.queue.onSubmittedWorkDone();
-
-  // --- Step 2: Transfer preprocessed data to WebNN ---
-  // Read the GPU buffer back and write to MLTensor
-  const stagingBuffer = gpuDevice.createBuffer({
-    size: inputTensorBuffer.size,
-    usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
-  });
-
-  const copyEncoder = gpuDevice.createCommandEncoder();
-  copyEncoder.copyBufferToBuffer(inputTensorBuffer, 0, stagingBuffer, 0, inputTensorBuffer.size);
-  gpuDevice.queue.submit([copyEncoder.finish()]);
-
-  await stagingBuffer.mapAsync(GPUMapMode.READ);
-  const inputData = new Float32Array(stagingBuffer.getMappedRange().slice(0));
-  stagingBuffer.unmap();
-  stagingBuffer.destroy();
-
-  // Write preprocessed data to WebNN MLTensor
-  mlContext.writeTensor(inputMLTensor, inputData);
-
-  // --- Step 3: Run WebNN inference ---
+  // --- Step 2: Run inference (same ONNX session) ---
   const inputName = session.inputNames[0];
   const outputName = session.outputNames[0];
-
-  // Use ONNX Runtime with pre-allocated tensors if possible,
-  // otherwise fall back to standard run
-  const feeds = {};
-  const ort = await import('onnxruntime-web');
-  feeds[inputName] = new ort.Tensor('float32', inputData, [1, 3, resolution, resolution]);
+  const feeds = { [inputName]: inputTensor };
   const results = await session.run(feeds);
-  const outputData = results[outputName].data;
+  const outputData = results[outputName].data; // Float32Array in NCHW
 
-  // --- Step 4: Write output to GPU buffer for postprocessing ---
+  // --- Step 3: Upload both tensors to GPU and run postprocess compute shader ---
+  // Ensure original buffer exists
+  const tensorByteSize = 3 * resolution * resolution * 4;
+  if (!originalTensorBuffer) {
+    originalTensorBuffer = gpuDevice.createBuffer({
+      size: tensorByteSize,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    });
+  }
+
+  // Upload styled output and original input to GPU
   gpuDevice.queue.writeBuffer(outputTensorBuffer, 0, outputData);
-
-  // --- Step 5: Postprocess (NCHW buffer → RGBA texture) ---
-  // Re-import video texture for blending with original
-  const videoTexture2 = gpuDevice.importExternalTexture({ source: videoSource });
+  gpuDevice.queue.writeBuffer(originalTensorBuffer, 0, inputData);
 
   // Update postprocess uniforms
-  const postprocessParams = new ArrayBuffer(16);
-  const postU32 = new Uint32Array(postprocessParams);
-  const postF32 = new Float32Array(postprocessParams);
-  postU32[0] = resolution;
-  postF32[1] = blendFactor;
-  postU32[2] = mirrorEnabled ? 1 : 0;
-  postU32[3] = 0;
-  gpuDevice.queue.writeBuffer(postprocessUniformBuffer, 0, postprocessParams);
+  const paramsBuffer = new ArrayBuffer(16);
+  new Uint32Array(paramsBuffer, 0, 1)[0] = resolution;
+  new Float32Array(paramsBuffer, 4, 1)[0] = blend;
+  new Uint32Array(paramsBuffer, 8, 1)[0] = mirror ? 1 : 0;
+  new Uint32Array(paramsBuffer, 12, 1)[0] = 0;
+  gpuDevice.queue.writeBuffer(postprocessUniformBuffer, 0, paramsBuffer);
 
+  // Bind group for postprocess
   const postprocessBG = gpuDevice.createBindGroup({
     layout: postprocessPipeline.getBindGroupLayout(0),
     entries: [
       { binding: 0, resource: { buffer: outputTensorBuffer } },
       { binding: 1, resource: outputRgbaTexture.createView() },
-      { binding: 2, resource: videoTexture2 },
+      { binding: 2, resource: { buffer: originalTensorBuffer } },
       { binding: 3, resource: { buffer: postprocessUniformBuffer } },
     ],
   });
 
-  const postEncoder = gpuDevice.createCommandEncoder();
-  const postprocessPass = postEncoder.beginComputePass();
-  postprocessPass.setPipeline(postprocessPipeline);
-  postprocessPass.setBindGroup(0, postprocessBG);
-  postprocessPass.dispatchWorkgroups(
+  const encoder = gpuDevice.createCommandEncoder();
+
+  // Postprocess compute pass
+  const computePass = encoder.beginComputePass();
+  computePass.setPipeline(postprocessPipeline);
+  computePass.setBindGroup(0, postprocessBG);
+  computePass.dispatchWorkgroups(
     Math.ceil(resolution / 16),
     Math.ceil(resolution / 16)
   );
-  postprocessPass.end();
+  computePass.end();
 
-  // --- Step 6: Render to canvas ---
+  // --- Step 4: Render texture to canvas ---
   const canvasTexture = gpuContext.getCurrentTexture();
   const renderBG = gpuDevice.createBindGroup({
     layout: renderPipeline.getBindGroupLayout(0),
@@ -477,7 +345,7 @@ export async function processFrameWebGPU(videoSource, session, options = {}) {
     ],
   });
 
-  const renderPass = postEncoder.beginRenderPass({
+  const renderPass = encoder.beginRenderPass({
     colorAttachments: [{
       view: canvasTexture.createView(),
       loadOp: 'clear',
@@ -490,36 +358,7 @@ export async function processFrameWebGPU(videoSource, session, options = {}) {
   renderPass.draw(6);
   renderPass.end();
 
-  gpuDevice.queue.submit([postEncoder.finish()]);
-}
-
-/**
- * Render raw camera frame to canvas via WebGPU (no style applied)
- * @param {HTMLVideoElement} videoSource - Camera video element
- * @param {boolean} mirror - Whether to mirror the frame
- */
-export async function renderRawFrameWebGPU(videoSource, mirror = true) {
-  if (!gpuDevice || !gpuContext) return;
-
-  // For raw frames, we use a simple video-to-canvas path
-  // Import video as external texture and render directly
-  const videoTexture = gpuDevice.importExternalTexture({ source: videoSource });
-  const canvasTexture = gpuContext.getCurrentTexture();
-
-  // Create a simple render that copies video to canvas
-  // Reuse the render pipeline with the video texture directly
-  // For simplicity, use a dedicated raw render bind group
-  const rawBG = gpuDevice.createBindGroup({
-    layout: renderPipeline.getBindGroupLayout(0),
-    entries: [
-      { binding: 0, resource: sampler },
-      { binding: 1, resource: outputRgbaTexture.createView() }, // Placeholder — we'll use a copy approach
-    ],
-  });
-
-  // For raw mode, just draw video texture. Since render pipeline expects texture_2d,
-  // we fall back to the canvas 2D context for raw frames when in WebGPU mode.
-  // The main performance benefit is in the styled path.
+  gpuDevice.queue.submit([encoder.finish()]);
 }
 
 /**
@@ -527,23 +366,28 @@ export async function renderRawFrameWebGPU(videoSource, mirror = true) {
  */
 export function updateWebGPUSettings(opts) {
   if (opts.resolution !== undefined) resolution = opts.resolution;
-  if (opts.blend !== undefined) blendFactor = opts.blend;
-  if (opts.mirror !== undefined) mirrorEnabled = opts.mirror;
 }
 
 /**
- * Clean up WebGPU resources
+ * Clean up WebGPU resources (does NOT destroy the device — allows re-init)
  */
 export function destroyWebGPUPipeline() {
-  inputTensorBuffer?.destroy();
   outputTensorBuffer?.destroy();
   outputRgbaTexture?.destroy();
-  preprocessUniformBuffer?.destroy();
+  originalTensorBuffer?.destroy();
   postprocessUniformBuffer?.destroy();
-  inputMLTensor?.destroy();
-  outputMLTensor?.destroy();
+
+  outputTensorBuffer = null;
+  outputRgbaTexture = null;
+  originalTensorBuffer = null;
+  postprocessUniformBuffer = null;
+
+  if (gpuContext) {
+    gpuContext.unconfigure();
+    gpuContext = null;
+  }
+
   gpuDevice?.destroy();
   gpuDevice = null;
-  gpuContext = null;
-  mlContext = null;
+  canvasEl = null;
 }
